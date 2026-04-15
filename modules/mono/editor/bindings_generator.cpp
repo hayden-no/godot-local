@@ -3116,11 +3116,24 @@ Error BindingsGenerator::_generate_cs_method(const BindingsGenerator::TypeInterf
 			p_output.append("unsafe ");
 		}
 
+		const bool partial = should_be_partial(p_itype, p_imethod);
+		if (partial) {
+			p_output.append("partial ");
+		}
+
 		String return_cs_type = return_type->cs_type + _get_generic_type_parameters(*return_type, p_imethod.return_type.generic_type_parameters);
 
 		p_output.append(return_cs_type + " ");
 		p_output.append(p_imethod.proxy_name + "(");
-		p_output.append(arguments_sig + ")\n" OPEN_BLOCK_L1);
+		p_output.append(arguments_sig + ")");
+
+		if (partial) {
+			// method stub
+			p_output.append(";\n");
+			return OK; // won't increase method bind count
+		}
+
+		p_output.append("\n" OPEN_BLOCK_L1);
 
 		if (p_imethod.is_virtual) {
 			// Godot virtual method must be overridden, therefore we return a default value by default.
@@ -5312,6 +5325,18 @@ void BindingsGenerator::handle_cmdline_args(const List<String> &p_cmdline_args) 
 		// Exit once done.
 		cleanup_and_exit_godot();
 	}
+}
+
+bool BindingsGenerator::should_be_partial(const TypeInterface &p_itype, const MethodInterface &p_imethod) {
+	if (!p_imethod.is_virtual) return false;
+	if (p_itype.proxy_name == "GodotObject") {
+		return true;
+	}
+	if (p_itype.proxy_name == "Node") {
+		return true;
+	}
+
+	return false;
 }
 
 #endif // DEBUG_ENABLED

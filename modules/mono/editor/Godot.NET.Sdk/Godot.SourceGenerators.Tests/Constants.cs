@@ -10,9 +10,9 @@ public static class Constants
 
     // Can't find what needs updating to be able to access ReferenceAssemblies.Net.Net80, so we're making our own one.
     public static ReferenceAssemblies Net80 => new ReferenceAssemblies(
-        "net8.0",
-        new PackageIdentity("Microsoft.NETCore.App.Ref", "8.0.0"),
-        Path.Combine("ref", "net8.0")
+        "net10.0",
+        new PackageIdentity("Microsoft.NETCore.App.Ref", "10.0.0"),
+        Path.Combine("ref", "net10.0")
     );
 
     public static string ExecutingAssemblyPath { get; }

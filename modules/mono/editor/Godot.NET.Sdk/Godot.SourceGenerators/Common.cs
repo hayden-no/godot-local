@@ -226,5 +226,16 @@ namespace Godot.SourceGenerators
                 isEnabledByDefault: true,
                 "The class must not be generic. Make the class non-generic, or remove the '[GlobalClass]' attribute.",
                 helpLinkUri: string.Format(_helpLinkFormat, "GD0402"));
+
+        public static readonly DiagnosticDescriptor StringDoesNotMatchAnyMemberNameRule = new(
+            id: "GDH0001",
+            title: "The string does not match any compatible member name",
+            messageFormat: "The string '{0}' does not match any {1} name in the class '{2}'",
+            category: "Usage",
+            DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            "The string does not match any appropriate member name in the class. Check the spelling and ensure the string matches an existing member name.",
+            helpLinkUri: string.Format(_helpLinkFormat, "GDH0001")
+        );
     }
 }

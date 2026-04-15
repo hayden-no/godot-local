@@ -24,6 +24,12 @@ namespace Godot.SourceGenerators.Sample
         {
             _ = a;
         }
+
+        /// <inheritdoc />
+        protected override void Test(int what)
+        {
+            _ = what;
+        }
     }
 
     public partial struct OuterClass

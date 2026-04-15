@@ -17,5 +17,9 @@ namespace Godot.SourceGenerators
         public const string GlobalClassAttr = "Godot.GlobalClassAttribute";
         public const string ToolAttr = "Godot.ToolAttribute";
         public const string SystemFlagsAttr = "System.FlagsAttribute";
+
+        public const string VirtualMethodImpliesOverrideAttr = "Godot.VirtualMethodImpliesOverrideAttribute";
+        public const string ExportComplexAttr = "Godot.ExportComplexAttribute";
+        public const string ExportComplexMemberAttr = "Godot.ExportComplexMemberAttribute";
     }
 }

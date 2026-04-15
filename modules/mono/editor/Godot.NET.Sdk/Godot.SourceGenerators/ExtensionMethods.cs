@@ -3,34 +3,60 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Godot.SourceGenerators
 {
     internal static class ExtensionMethods
     {
         public static bool TryGetGlobalAnalyzerProperty(
-            this GeneratorExecutionContext context, string property, out string? value
-        ) => context.AnalyzerConfigOptions.GlobalOptions
-            .TryGetValue("build_property." + property, out value);
+            this GeneratorExecutionContext context,
+            string property,
+            out string? value
+        )
+        {
+        // context.AnalyzerConfigOptions.GlobalOptions.TryGetValue("build_property." + property, out value);
+            value = default;
+            return false;
+        }
 
-        public static bool AreGodotSourceGeneratorsDisabled(this GeneratorExecutionContext context)
-            => context.TryGetGlobalAnalyzerProperty("GodotSourceGenerators", out string? toggle) &&
-               toggle != null &&
-               toggle.Equals("disabled", StringComparison.OrdinalIgnoreCase);
+        public static bool AreGodotSourceGeneratorsDisabled(this GeneratorExecutionContext context) =>
+            context.TryGetGlobalAnalyzerProperty("GodotSourceGenerators", out string? toggle) &&
+            toggle != null &&
+            toggle.Equals("disabled", StringComparison.OrdinalIgnoreCase);
 
-        public static bool IsGodotToolsProject(this GeneratorExecutionContext context)
-            => context.TryGetGlobalAnalyzerProperty("IsGodotToolsProject", out string? toggle) &&
-               toggle != null &&
-               toggle.Equals("true", StringComparison.OrdinalIgnoreCase);
+        public static bool IsGodotToolsProject(this GeneratorExecutionContext context) =>
+            context.TryGetGlobalAnalyzerProperty("IsGodotToolsProject", out string? toggle) &&
+            toggle != null &&
+            toggle.Equals("true", StringComparison.OrdinalIgnoreCase);
 
-        public static bool IsGodotSourceGeneratorDisabled(this GeneratorExecutionContext context, string generatorName) =>
+        public static bool
+            IsGodotSourceGeneratorDisabled(this GeneratorExecutionContext context, string generatorName) =>
             AreGodotSourceGeneratorsDisabled(context) ||
             (context.TryGetGlobalAnalyzerProperty("GodotDisabledSourceGenerators", out string? disabledGenerators) &&
-            disabledGenerators != null &&
-            disabledGenerators.Split(';').Contains(generatorName));
+                disabledGenerators != null &&
+                disabledGenerators.Split(';').Contains(generatorName));
+
+        public static bool IsSourceGenEnabled(this AnalyzerConfigOptionsProvider provider, string generatorName)
+        {
+            if (provider.GlobalOptions.TryGetValue("GodotSourceGenerators", out string? toggle) &&
+                toggle?.Equals("disabled", StringComparison.OrdinalIgnoreCase) is true)
+                return false;
+
+            if (provider.GlobalOptions.TryGetValue("GodotDisabledSourceGenerators", out string? disabledGenerators) && disabledGenerators?.Split(';').Contains(generatorName) is true)
+                return false;
+
+            return true;
+        }
+
+        public static bool IsToolsProject(this AnalyzerConfigOptionsProvider provider)
+        {
+            return provider.GlobalOptions.TryGetValue("IsGodotToolsProject", out string? toggle) && toggle?.Equals("true", StringComparison.OrdinalIgnoreCase) is true;
+        }
 
         public static bool InheritsFrom(this ITypeSymbol? symbol, string assemblyName, string typeFullName)
         {
@@ -54,8 +80,7 @@ namespace Godot.SourceGenerators
 
             while (symbol != null)
             {
-                if (symbol.ContainingAssembly?.Name == "GodotSharp")
-                    return symbol;
+                if (symbol.ContainingAssembly?.Name == "GodotSharp") return symbol;
 
                 symbol = symbol.BaseType;
             }
@@ -67,8 +92,7 @@ namespace Godot.SourceGenerators
         {
             var nativeType = classTypeSymbol.GetGodotScriptNativeClass();
 
-            if (nativeType == null)
-                return null;
+            if (nativeType == null) return null;
 
             var godotClassNameAttr = nativeType.GetAttributes()
                 .FirstOrDefault(a => a.AttributeClass?.IsGodotClassNameAttribute() ?? false);
@@ -81,8 +105,69 @@ namespace Godot.SourceGenerators
             return godotClassName ?? nativeType.Name;
         }
 
+        public static bool IsGodotScriptClassPredicate(this SyntaxNode node, CancellationToken cancellationToken)
+        {
+            if (node is ClassDeclarationSyntax cds && cds.IsPartial())
+            {
+                if (cds.IsNested() && cds.AreAllOuterTypesPartial(out _)) return false;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        public static Context GodotScriptClassTransform(
+            this GeneratorSyntaxContext context,
+            CancellationToken cancellationToken
+        )
+        {
+            if (cancellationToken.IsCancellationRequested) return new(null, null);
+            if (context.Node is not ClassDeclarationSyntax cds) return new(null, null);
+            if (context.SemanticModel.GetDeclaredSymbol(cds) is not INamedTypeSymbol symbol) return new(null, cds);
+            if (symbol.BaseType is null || !symbol.BaseType.InheritsFrom("GodotSharp", GodotClasses.GodotObject)) return new(null, cds);
+
+            return new(symbol, cds);
+        }
+
+        public record Context
+        {
+            public INamedTypeSymbol Symbol { get; }
+            public ClassDeclarationSyntax Syntax { get; }
+            public bool IsValid { get; }
+
+            public Context(INamedTypeSymbol? symbol, ClassDeclarationSyntax? syntax)
+            {
+                if (symbol is null || syntax is null)
+                {
+                    IsValid = false;
+                    return;
+                }
+
+                Symbol = symbol;
+                Syntax = syntax;
+                IsValid = true;
+            }
+
+            public Context() => IsValid = false;
+
+            public readonly static IEqualityComparer<Context> SymbolComparer = EqualityComparer<Context>.Create(
+                (left, right) => SymbolEqualityComparer.Default.Equals(left?.Symbol, right?.Symbol),
+                context => SymbolEqualityComparer.Default.GetHashCode(context?.Symbol)
+            );
+        }
+
+        public static IncrementalValuesProvider<Context> GodotScriptClassProvider(
+            this IncrementalGeneratorInitializationContext context
+        )
+        {
+            return context.SyntaxProvider.CreateSyntaxProvider(IsGodotScriptClassPredicate, GodotScriptClassTransform)
+                .Where(c => c.IsValid).WithComparer(Context.SymbolComparer);
+        }
+
         private static bool TryGetGodotScriptClass(
-            this ClassDeclarationSyntax cds, Compilation compilation,
+            this ClassDeclarationSyntax cds,
+            Compilation compilation,
             out INamedTypeSymbol? symbol
         )
         {
@@ -90,14 +175,16 @@ namespace Godot.SourceGenerators
 
             var classTypeSymbol = sm.GetDeclaredSymbol(cds);
 
-            if (classTypeSymbol?.BaseType == null
-                || !classTypeSymbol.BaseType.InheritsFrom("GodotSharp", GodotClasses.GodotObject))
+            if (classTypeSymbol?.BaseType == null ||
+                !classTypeSymbol.BaseType.InheritsFrom("GodotSharp", GodotClasses.GodotObject))
             {
                 symbol = null;
+
                 return false;
             }
 
             symbol = classTypeSymbol;
+
             return true;
         }
 
@@ -108,16 +195,13 @@ namespace Godot.SourceGenerators
         {
             foreach (var cds in source)
             {
-                if (cds.TryGetGodotScriptClass(compilation, out var symbol))
-                    yield return (cds, symbol!);
+                if (cds.TryGetGodotScriptClass(compilation, out var symbol)) yield return (cds, symbol!);
             }
         }
 
-        public static bool IsNested(this TypeDeclarationSyntax cds)
-            => cds.Parent is TypeDeclarationSyntax;
+        public static bool IsNested(this TypeDeclarationSyntax cds) => cds.Parent is TypeDeclarationSyntax;
 
-        public static bool IsPartial(this TypeDeclarationSyntax cds)
-            => cds.Modifiers.Any(SyntaxKind.PartialKeyword);
+        public static bool IsPartial(this TypeDeclarationSyntax cds) => cds.Modifiers.Any(SyntaxKind.PartialKeyword);
 
         public static bool AreAllOuterTypesPartial(
             this TypeDeclarationSyntax cds,
@@ -131,6 +215,7 @@ namespace Godot.SourceGenerators
                 if (!outerTypeDeclSyntax.IsPartial())
                 {
                     typeMissingPartial = outerTypeDeclSyntax;
+
                     return false;
                 }
 
@@ -138,21 +223,23 @@ namespace Godot.SourceGenerators
             }
 
             typeMissingPartial = null;
+
             return true;
         }
 
         public static string GetDeclarationKeyword(this INamedTypeSymbol namedTypeSymbol)
         {
-            string? keyword = namedTypeSymbol.DeclaringSyntaxReferences
-                .OfType<TypeDeclarationSyntax>().FirstOrDefault()?
-                .Keyword.Text;
+            string? keyword = namedTypeSymbol.DeclaringSyntaxReferences.OfType<TypeDeclarationSyntax>()
+                .FirstOrDefault()
+                ?.Keyword.Text;
 
-            return keyword ?? namedTypeSymbol.TypeKind switch
-            {
-                TypeKind.Interface => "interface",
-                TypeKind.Struct => "struct",
-                _ => "class"
-            };
+            return keyword ??
+                namedTypeSymbol.TypeKind switch
+                {
+                    TypeKind.Interface => "interface",
+                    TypeKind.Struct => "struct",
+                    _ => "class"
+                };
         }
 
         public static string GetAccessibilityKeyword(this INamedTypeSymbol namedTypeSymbol)
@@ -181,32 +268,31 @@ namespace Godot.SourceGenerators
             };
         }
 
-        private static SymbolDisplayFormat FullyQualifiedFormatOmitGlobal { get; } =
-            SymbolDisplayFormat.FullyQualifiedFormat
-                .WithGlobalNamespaceStyle(SymbolDisplayGlobalNamespaceStyle.Omitted)
-                .WithMemberOptions(SymbolDisplayMemberOptions.IncludeContainingType);
+        private static SymbolDisplayFormat FullyQualifiedFormatOmitGlobal { get; } = SymbolDisplayFormat
+            .FullyQualifiedFormat.WithGlobalNamespaceStyle(SymbolDisplayGlobalNamespaceStyle.Omitted)
+            .WithMemberOptions(SymbolDisplayMemberOptions.IncludeContainingType);
 
-        private static SymbolDisplayFormat FullyQualifiedFormatIncludeGlobal { get; } =
-            SymbolDisplayFormat.FullyQualifiedFormat
-                .WithGlobalNamespaceStyle(SymbolDisplayGlobalNamespaceStyle.Included)
-                .WithMemberOptions(SymbolDisplayMemberOptions.IncludeContainingType);
+        private static SymbolDisplayFormat FullyQualifiedFormatIncludeGlobal { get; } = SymbolDisplayFormat
+            .FullyQualifiedFormat.WithGlobalNamespaceStyle(SymbolDisplayGlobalNamespaceStyle.Included)
+            .WithMemberOptions(SymbolDisplayMemberOptions.IncludeContainingType);
 
-        public static string FullQualifiedNameOmitGlobal(this ITypeSymbol symbol)
-            => symbol.ToDisplayString(NullableFlowState.NotNull, FullyQualifiedFormatOmitGlobal);
+        public static string FullQualifiedNameOmitGlobal(this ITypeSymbol symbol) =>
+            symbol.ToDisplayString(NullableFlowState.NotNull, FullyQualifiedFormatOmitGlobal);
 
-        public static string FullQualifiedNameOmitGlobal(this INamespaceSymbol namespaceSymbol)
-            => namespaceSymbol.ToDisplayString(FullyQualifiedFormatOmitGlobal);
+        public static string FullQualifiedNameOmitGlobal(this INamespaceSymbol namespaceSymbol) =>
+            namespaceSymbol.ToDisplayString(FullyQualifiedFormatOmitGlobal);
 
-        public static string FullQualifiedNameIncludeGlobal(this ITypeSymbol symbol)
-            => symbol.ToDisplayString(NullableFlowState.NotNull, FullyQualifiedFormatIncludeGlobal);
+        public static string FullQualifiedNameIncludeGlobal(this ITypeSymbol symbol) =>
+            symbol.ToDisplayString(NullableFlowState.NotNull, FullyQualifiedFormatIncludeGlobal);
 
-        public static string FullQualifiedNameIncludeGlobal(this INamespaceSymbol namespaceSymbol)
-            => namespaceSymbol.ToDisplayString(FullyQualifiedFormatIncludeGlobal);
+        public static string FullQualifiedNameIncludeGlobal(this INamespaceSymbol namespaceSymbol) =>
+            namespaceSymbol.ToDisplayString(FullyQualifiedFormatIncludeGlobal);
 
         public static string FullQualifiedSyntax(this SyntaxNode node, SemanticModel sm)
         {
             StringBuilder sb = new();
             FullQualifiedSyntax(node, sm, sb, true);
+
             return sb.ToString();
         }
 
@@ -215,17 +301,20 @@ namespace Godot.SourceGenerators
             if (node is NameSyntax ns)
             {
                 bool isMemberAccess = !isFirstNode && node.Parent is MemberAccessExpressionSyntax;
-                bool isInitializer = isFirstNode && node.Parent is AssignmentExpressionSyntax { Parent: InitializerExpressionSyntax };
+                bool isInitializer = isFirstNode &&
+                    node.Parent is AssignmentExpressionSyntax { Parent: InitializerExpressionSyntax };
 
                 if (!isMemberAccess && !isInitializer)
                 {
                     SymbolInfo nameInfo = sm.GetSymbolInfo(ns);
                     sb.Append(nameInfo.Symbol?.ToDisplayString(FullyQualifiedFormatIncludeGlobal) ?? ns.ToString());
+
                     return;
                 }
             }
 
             bool innerIsFirstNode = true;
+
             foreach (var child in node.ChildNodesAndTokens())
             {
                 if (child.HasLeadingTrivia)
@@ -259,7 +348,12 @@ namespace Godot.SourceGenerators
                 }
             }
 
-            static void ParenEnclosedFullQualifiedSyntax(SyntaxNode node, SemanticModel sm, StringBuilder sb, bool isFirstNode)
+            static void ParenEnclosedFullQualifiedSyntax(
+                SyntaxNode node,
+                SemanticModel sm,
+                StringBuilder sb,
+                bool isFirstNode
+            )
             {
                 sb.Append(SyntaxFactory.Token(SyntaxKind.OpenParenToken));
                 FullQualifiedSyntax(node, sm, sb, isFirstNode);
@@ -267,53 +361,54 @@ namespace Godot.SourceGenerators
             }
         }
 
-        public static string SanitizeQualifiedNameForUniqueHint(this string qualifiedName)
-            => qualifiedName
+        public static string SanitizeQualifiedNameForUniqueHint(this string qualifiedName) =>
+            qualifiedName
                 // AddSource() doesn't support @ prefix
                 .Replace("@", "")
                 // AddSource() doesn't support angle brackets
                 .Replace("<", "(Of ")
                 .Replace(">", ")");
 
-        public static bool IsGodotExportAttribute(this INamedTypeSymbol symbol)
-            => symbol.FullQualifiedNameOmitGlobal() == GodotClasses.ExportAttr;
+        public static bool IsGodotExportAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.ExportAttr;
 
-        public static bool IsGodotSignalAttribute(this INamedTypeSymbol symbol)
-            => symbol.FullQualifiedNameOmitGlobal() == GodotClasses.SignalAttr;
+        public static bool IsGodotSignalAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.SignalAttr;
 
-        public static bool IsGodotMustBeVariantAttribute(this INamedTypeSymbol symbol)
-            => symbol.FullQualifiedNameOmitGlobal() == GodotClasses.MustBeVariantAttr;
+        public static bool IsGodotMustBeVariantAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.MustBeVariantAttr;
 
-        public static bool IsGodotClassNameAttribute(this INamedTypeSymbol symbol)
-            => symbol.FullQualifiedNameOmitGlobal() == GodotClasses.GodotClassNameAttr;
+        public static bool IsGodotClassNameAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.GodotClassNameAttr;
 
-        public static bool IsGodotGlobalClassAttribute(this INamedTypeSymbol symbol)
-            => symbol.FullQualifiedNameOmitGlobal() == GodotClasses.GlobalClassAttr;
+        public static bool IsGodotGlobalClassAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.GlobalClassAttr;
 
-        public static bool IsGodotExportToolButtonAttribute(this INamedTypeSymbol symbol)
-            => symbol.FullQualifiedNameOmitGlobal() == GodotClasses.ExportToolButtonAttr;
+        public static bool IsGodotExportToolButtonAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.ExportToolButtonAttr;
 
-        public static bool IsGodotToolAttribute(this INamedTypeSymbol symbol)
-            => symbol.FullQualifiedNameOmitGlobal() == GodotClasses.ToolAttr;
+        public static bool IsGodotToolAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.ToolAttr;
 
-        public static bool IsSystemFlagsAttribute(this INamedTypeSymbol symbol)
-            => symbol.FullQualifiedNameOmitGlobal() == GodotClasses.SystemFlagsAttr;
+        public static bool IsSystemFlagsAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.SystemFlagsAttr;
+
+        public static bool IsVirtualMethodImpliesOverrideAttribute(this INamedTypeSymbol symbol) =>
+            symbol.FullQualifiedNameOmitGlobal() == GodotClasses.VirtualMethodImpliesOverrideAttr;
 
         public static GodotMethodData? HasGodotCompatibleSignature(
             this IMethodSymbol method,
             MarshalUtils.TypeCache typeCache
         )
         {
-            if (method.IsGenericMethod)
-                return null;
+            if (method.IsGenericMethod) return null;
 
             var retSymbol = method.ReturnType;
-            var retType = method.ReturnsVoid ?
-                null :
-                MarshalUtils.ConvertManagedTypeToMarshalType(method.ReturnType, typeCache);
+            var retType = method.ReturnsVoid
+                ? null
+                : MarshalUtils.ConvertManagedTypeToMarshalType(method.ReturnType, typeCache);
 
-            if (retType == null && !method.ReturnsVoid)
-                return null;
+            if (retType == null && !method.ReturnsVoid) return null;
 
             var parameters = method.Parameters;
 
@@ -323,15 +418,19 @@ namespace Godot.SourceGenerators
                 // Attempt to determine the variant type
                 .Select(p => MarshalUtils.ConvertManagedTypeToMarshalType(p.Type, typeCache))
                 // Discard parameter types that couldn't be determined (null entries)
-                .Where(t => t != null).Cast<MarshalType>().ToImmutableArray();
+                .Where(t => t != null)
+                .Cast<MarshalType>()
+                .ToImmutableArray();
 
             // If any parameter type was incompatible, it was discarded so the length won't match
-            if (parameters.Length > paramTypes.Length)
-                return null; // Ignore incompatible method
+            if (parameters.Length > paramTypes.Length) return null; // Ignore incompatible method
 
-            return new GodotMethodData(method, paramTypes,
+            return new GodotMethodData(
+                method,
+                paramTypes,
                 parameters.Select(p => p.Type).ToImmutableArray(),
-                retType != null ? (retType.Value, retSymbol) : null);
+                retType != null ? (retType.Value, retSymbol) : null
+            );
         }
 
         public static IEnumerable<GodotMethodData> WhereHasGodotCompatibleSignature(
@@ -343,8 +442,7 @@ namespace Godot.SourceGenerators
             {
                 var methodData = HasGodotCompatibleSignature(method, typeCache);
 
-                if (methodData != null)
-                    yield return methodData.Value;
+                if (methodData != null) yield return methodData.Value;
             }
         }
 
@@ -357,8 +455,7 @@ namespace Godot.SourceGenerators
             {
                 var marshalType = MarshalUtils.ConvertManagedTypeToMarshalType(property.Type, typeCache);
 
-                if (marshalType == null)
-                    continue;
+                if (marshalType == null) continue;
 
                 yield return new GodotPropertyData(property, marshalType.Value);
             }
@@ -374,8 +471,7 @@ namespace Godot.SourceGenerators
                 // TODO: We should still restore read-only fields after reloading assembly. Two possible ways: reflection or turn RestoreGodotObjectData into a constructor overload.
                 var marshalType = MarshalUtils.ConvertManagedTypeToMarshalType(field.Type, typeCache);
 
-                if (marshalType == null)
-                    continue;
+                if (marshalType == null) continue;
 
                 yield return new GodotFieldData(field, marshalType.Value);
             }
@@ -386,12 +482,62 @@ namespace Godot.SourceGenerators
             return locations.FirstOrDefault(location => location.SourceTree != null) ?? locations.FirstOrDefault();
         }
 
-        public static string Path(this Location location)
-            => location.SourceTree?.GetLineSpan(location.SourceSpan).Path
-               ?? location.GetLineSpan().Path;
+        public static string Path(this Location location) =>
+            location.SourceTree?.GetLineSpan(location.SourceSpan).Path ?? location.GetLineSpan().Path;
 
-        public static int StartLine(this Location location)
-            => location.SourceTree?.GetLineSpan(location.SourceSpan).StartLinePosition.Line
-               ?? location.GetLineSpan().StartLinePosition.Line;
+        public static int StartLine(this Location location) =>
+            location.SourceTree?.GetLineSpan(location.SourceSpan).StartLinePosition.Line ??
+            location.GetLineSpan().StartLinePosition.Line;
+
+        public static IEnumerable<TSymbol> AllMembers<TSymbol>(
+            this INamedTypeSymbol typeSymbol,
+            bool includeSuperTypes = true,
+            bool includeInterfaces = true
+        )
+            where TSymbol : ISymbol
+        {
+            var output = typeSymbol.GetMembers().OfType<TSymbol>();
+
+            if (includeSuperTypes)
+            {
+                var baseType = typeSymbol.BaseType;
+
+                while (baseType is not null)
+                {
+                    output = output.Concat(baseType.GetMembers().OfType<TSymbol>());
+                    baseType = baseType.BaseType;
+                }
+            }
+
+            if (includeInterfaces)
+            {
+                output = output.Concat(typeSymbol.Interfaces.SelectMany(i => i.GetMembers().OfType<TSymbol>()));
+            }
+
+            return output;
+        }
+
+        class AnonEqualityComparer<T> : IEqualityComparer<T>
+        {
+            public Func<T?, T?, bool> Comparer { get; }
+            public Func<T?, int> Hasher { get; }
+
+            public AnonEqualityComparer(Func<T?, T?, bool> comparer, Func<T?, int> hasher)
+            {
+                Comparer = comparer;
+                Hasher = hasher;
+            }
+
+            public bool Equals(T? x, T? y) => Comparer(x, y);
+            public int GetHashCode(T obj) => Hasher(obj);
+        }
+
+        extension<T>(EqualityComparer<T>)
+        {
+            public static IEqualityComparer<T> Create(Func<T?, T?, bool> comparer, Func<T?, int> hash)
+            {
+                return new AnonEqualityComparer<T>(comparer, hash);
+            }
+        }
     }
 }

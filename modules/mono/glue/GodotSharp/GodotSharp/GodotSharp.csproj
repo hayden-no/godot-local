@@ -44,7 +44,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="JetBrains.Annotations" Version="2025.2.4" />
     <PackageReference Include="ReflectionAnalyzers" Version="0.1.22-dev" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
+    <PackageReference Include="System.Runtime.Numerics" Version="4.3.0" />
     <!--PackageReference Include="IDisposableAnalyzers" Version="3.4.13" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" /-->
   </ItemGroup>
 
@@ -55,7 +57,9 @@
   <!-- Sources -->
   <ItemGroup>
     <Compile Include="Core\Aabb.cs" />
+    <Compile Include="Core\Attributes\ExportComplexAttribute.cs" />
     <Compile Include="Core\Attributes\ExportToolButtonAttribute.cs" />
+    <Compile Include="Core\Attributes\VirtualMethodImpliesOverrideAttribute.cs" />
     <Compile Include="Core\Bridge\GodotSerializationInfo.cs" />
     <Compile Include="Core\Bridge\MethodInfo.cs" />
     <Compile Include="Core\Callable.generics.cs" />
@@ -94,6 +98,8 @@
     <Compile Include="Core\Extensions\NodeExtensions.cs" />
     <Compile Include="Core\Extensions\PackedSceneExtensions.cs" />
     <Compile Include="Core\Extensions\ResourceLoaderExtensions.cs" />
+    <Compile Include="Core\Features\NodeExtensions.cs" />
+    <Compile Include="Core\Features\ObjectExtensions.cs" />
     <Compile Include="Core\GD.cs" />
     <Compile Include="Core\GodotObject.base.cs" />
     <Compile Include="Core\GodotObject.exceptions.cs" />
@@ -118,6 +124,7 @@
     <Compile Include="Core\NodePath.cs" />
     <Compile Include="Core\Plane.cs" />
     <Compile Include="Core\Projection.cs" />
+    <Compile Include="Core\Properties\IProperty.cs" />
     <Compile Include="Core\Quaternion.cs" />
     <Compile Include="Core\Rect2.cs" />
     <Compile Include="Core\Rect2I.cs" />
@@ -146,6 +153,10 @@
   <!-- Compat Sources -->
   <ItemGroup Condition=" '$(GodotNoDeprecated)' == '' ">
     <Compile Include="Compat.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Core\Extensions\NewExtensions\" />
+    <Folder Include="Core\Validation\" />
   </ItemGroup>
 
   <!--

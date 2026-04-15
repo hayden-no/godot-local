@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
@@ -21,6 +22,38 @@ namespace Godot.SourceGenerators
 
                 GodotObjectType = GetTypeByMetadataNameOrThrow(GodotClasses.GodotObject);
             }
+
+            public TypeCache(INamedTypeSymbol godotObjectType) => GodotObjectType = godotObjectType ??
+                throw new InvalidOperationException($"Type not found: '{GodotClasses.GodotObject}'.");
+        }
+
+        public static IncrementalValueProvider<TypeCache> GetTypeCacheProvider(
+            IncrementalGeneratorInitializationContext context
+        )
+        {
+            return context.CompilationProvider.WithComparer(GodotObjectTypeComparer.Instance).Select((compilation, token) => new TypeCache(compilation.GetGodotObjectType()));
+        }
+
+        internal class GodotObjectTypeComparer : IEqualityComparer<Compilation>
+        {
+            public static readonly GodotObjectTypeComparer Instance = new();
+
+            /// <inheritdoc />
+            public bool Equals(Compilation x, Compilation y)
+            {
+                return SymbolEqualityComparer.Default.Equals(x.GetGodotObjectType(),y.GetGodotObjectType());
+            }
+
+            /// <inheritdoc />
+            public int GetHashCode(Compilation obj)
+            {
+                return SymbolEqualityComparer.Default.GetHashCode(obj.GetGodotObjectType());
+            }
+        }
+
+        public static INamedTypeSymbol? GetGodotObjectType(this Compilation compilation)
+        {
+            return compilation.GetTypeByMetadataName(GodotClasses.GodotObject);
         }
 
         public static VariantType? ConvertMarshalTypeToVariantType(MarshalType marshalType)
@@ -331,6 +364,31 @@ namespace Godot.SourceGenerators
                         ((INamedTypeSymbol)typeSymbol).TypeArguments[0].FullQualifiedNameIncludeGlobal(), ">(",
                         inputExpr, ")"),
                 _ => source.Append(VariantUtils, ".ConvertTo<",
+                    typeSymbol.FullQualifiedNameIncludeGlobal(), ">(", inputExpr, ")"),
+            };
+        }
+
+        public static string GetNativeVariantToManagedExpr(
+            string inputExpr, ITypeSymbol typeSymbol, MarshalType marshalType)
+        {
+            return marshalType switch
+            {
+                // We need a special case for GodotObjectOrDerived[], because it's not supported by VariantUtils.ConvertTo<T>
+                MarshalType.GodotObjectOrDerivedArray =>
+                    string.Concat(VariantUtils, ".ConvertToSystemArrayOfGodotObject<",
+                        ((IArrayTypeSymbol)typeSymbol).ElementType.FullQualifiedNameIncludeGlobal(), ">(",
+                        inputExpr, ")"),
+                // We need a special case for generic Godot collections and GodotObjectOrDerived[], because VariantUtils.ConvertTo<T> is slower
+                MarshalType.GodotGenericDictionary =>
+                    string.Concat(VariantUtils, ".ConvertToDictionary<",
+                        ((INamedTypeSymbol)typeSymbol).TypeArguments[0].FullQualifiedNameIncludeGlobal(), ", ",
+                        ((INamedTypeSymbol)typeSymbol).TypeArguments[1].FullQualifiedNameIncludeGlobal(), ">(",
+                        inputExpr, ")"),
+                MarshalType.GodotGenericArray =>
+                    string.Concat(VariantUtils, ".ConvertToArray<",
+                        ((INamedTypeSymbol)typeSymbol).TypeArguments[0].FullQualifiedNameIncludeGlobal(), ">(",
+                        inputExpr, ")"),
+                _ => string.Concat(VariantUtils, ".ConvertTo<",
                     typeSymbol.FullQualifiedNameIncludeGlobal(), ">(", inputExpr, ")"),
             };
         }

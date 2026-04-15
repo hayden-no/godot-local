@@ -8,58 +8,87 @@ using Microsoft.CodeAnalysis.Text;
 namespace Godot.SourceGenerators
 {
     [Generator]
-    public class ScriptSignalsGenerator : ISourceGenerator
+    public class ScriptSignalsGenerator : IIncrementalGenerator
     {
-        public void Initialize(GeneratorInitializationContext context)
-        {
-        }
+        const string GENERATOR_NAME = "ScriptSignals";
 
-        public void Execute(GeneratorExecutionContext context)
-        {
-            if (context.IsGodotSourceGeneratorDisabled("ScriptSignals"))
-                return;
-
-            INamedTypeSymbol[] godotClasses = context
-                .Compilation.SyntaxTrees
-                .SelectMany(tree =>
-                    tree.GetRoot().DescendantNodes()
-                        .OfType<ClassDeclarationSyntax>()
-                        .SelectGodotScriptClasses(context.Compilation)
-                        // Report and skip non-partial classes
-                        .Where(x =>
-                        {
-                            if (x.cds.IsPartial())
-                            {
-                                if (x.cds.IsNested() && !x.cds.AreAllOuterTypesPartial(out _))
-                                {
-                                    return false;
-                                }
-
-                                return true;
-                            }
-
-                            return false;
-                        })
-                        .Select(x => x.symbol)
-                )
-                .Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default)
-                .ToArray();
-
-            if (godotClasses.Length > 0)
-            {
-                var typeCache = new MarshalUtils.TypeCache(context.Compilation);
-
-                foreach (var godotClass in godotClasses)
-                {
-                    VisitGodotScriptClass(context, typeCache, godotClass);
-                }
-            }
-        }
+        // public void Initialize(GeneratorInitializationContext context)
+        // {
+        // }
+        //
+        // public void Execute(GeneratorExecutionContext context)
+        // {
+        //     if (context.IsGodotSourceGeneratorDisabled("ScriptSignals"))
+        //         return;
+        //
+        //     INamedTypeSymbol[] godotClasses = context
+        //         .Compilation.SyntaxTrees
+        //         .SelectMany(tree =>
+        //             tree.GetRoot().DescendantNodes()
+        //                 .OfType<ClassDeclarationSyntax>()
+        //                 .SelectGodotScriptClasses(context.Compilation)
+        //                 // Report and skip non-partial classes
+        //                 .Where(x =>
+        //                 {
+        //                     if (x.cds.IsPartial())
+        //                     {
+        //                         if (x.cds.IsNested() && !x.cds.AreAllOuterTypesPartial(out _))
+        //                         {
+        //                             return false;
+        //                         }
+        //
+        //                         return true;
+        //                     }
+        //
+        //                     return false;
+        //                 })
+        //                 .Select(x => x.symbol)
+        //         )
+        //         .Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default)
+        //         .ToArray();
+        //
+        //     if (godotClasses.Length > 0)
+        //     {
+        //         var typeCache = new MarshalUtils.TypeCache(context.Compilation);
+        //
+        //         foreach (var godotClass in godotClasses)
+        //         {
+        //             VisitGodotScriptClass(context, typeCache, godotClass);
+        //         }
+        //     }
+        // }
 
         internal static string SignalDelegateSuffix = "EventHandler";
 
+        /// <inheritdoc />
+        public void Initialize(IncrementalGeneratorInitializationContext context)
+        {
+            var options = context.AnalyzerConfigOptionsProvider.Select(
+                ((o, ct) =>
+                {
+                    var IsEnabled = o.IsSourceGenEnabled(GENERATOR_NAME);
+
+                    return new { IsEnabled };
+                })
+            );
+            var typeCache = MarshalUtils.GetTypeCacheProvider(context);
+
+            var classes = context.GodotScriptClassProvider();
+
+            context.RegisterSourceOutput(classes.Combine(options.Combine(typeCache)),
+                (productionContext, tuple) =>
+                {
+                    var (Context, (Options, TypeCache)) = tuple;
+                    var (symbol, syntax) = (Context.Symbol, Context.Syntax);
+                    if (!Context.IsValid || !Options.IsEnabled)
+                        return;
+
+                    VisitGodotScriptClass(productionContext, TypeCache, symbol);
+                });
+        }
+
         private static void VisitGodotScriptClass(
-            GeneratorExecutionContext context,
+            SourceProductionContext context,
             MarshalUtils.TypeCache typeCache,
             INamedTypeSymbol symbol
         )

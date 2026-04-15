@@ -928,15 +928,15 @@ public partial struct Variant : IDisposable
         CreateTakingOwnershipOfDisposableValue(VariantUtils.CreateFromSystemArrayOfRid(from));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static implicit operator Variant(GodotObject from) =>
+    public static implicit operator Variant(GodotObject? from) =>
         CreateTakingOwnershipOfDisposableValue(VariantUtils.CreateFromGodotObject(from));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static implicit operator Variant(StringName from) =>
+    public static implicit operator Variant(StringName? from) =>
         CreateTakingOwnershipOfDisposableValue(VariantUtils.CreateFromStringName(from));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static implicit operator Variant(NodePath from) =>
+    public static implicit operator Variant(NodePath? from) =>
         CreateTakingOwnershipOfDisposableValue(VariantUtils.CreateFromNodePath(from));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -944,10 +944,10 @@ public partial struct Variant : IDisposable
         CreateTakingOwnershipOfDisposableValue(VariantUtils.CreateFromRid(from));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static implicit operator Variant(Collections.Dictionary from) =>
+    public static implicit operator Variant(Collections.Dictionary? from) =>
         CreateTakingOwnershipOfDisposableValue(VariantUtils.CreateFromDictionary(from));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static implicit operator Variant(Collections.Array from) =>
+    public static implicit operator Variant(Collections.Array? from) =>
         CreateTakingOwnershipOfDisposableValue(VariantUtils.CreateFromArray(from));
 }

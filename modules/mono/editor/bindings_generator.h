@@ -870,6 +870,8 @@ public:
 	BindingsGenerator() {
 		_initialize();
 	}
+private:
+	static bool should_be_partial(const TypeInterface &p_itype, const MethodInterface &p_imethod);
 };
 
 #endif // DEBUG_ENABLED
