@@ -6,7 +6,7 @@ using Microsoft.CodeAnalysis;
 
 namespace Godot.SourceGenerators
 {
-    internal static class MarshalUtils
+    public static class MarshalUtils
     {
         public class TypeCache
         {

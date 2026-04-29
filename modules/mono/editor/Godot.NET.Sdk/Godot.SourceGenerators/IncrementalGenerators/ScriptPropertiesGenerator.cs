@@ -95,8 +95,13 @@ public class ScriptPropertiesGenerator : IIncrementalGenerator
 
                 bool isInnerClass = symbol.ContainingType is {};
                 bool isToolClass = symbol.HasAttribute(GodotClasses.ToolAttr);
-                string fileHint = symbol.FullQualifiedNameOmitGlobal().SanitizeQualifiedNameForUniqueHint() +
-                    "_ScriptProperties.generated";
+                // BUG: duplicate file hint
+                // temp workaround: append random
+                // string rand = Guid.NewGuid().ToString("N");
+                // string fileHint =
+                //     $"{symbol.FullQualifiedNameOmitGlobal().SanitizeQualifiedNameForUniqueHint()}_ScriptProperties.{rand}.generated";
+
+                string fileHint = GenUtil.GetFileHint(GENERATOR_NAME, symbol);
 
                 var writer = new FormatWriter();
                 writer.WriteUsingStatements("Godot", "Godot.NativeInterop");

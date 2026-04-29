@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -19,8 +20,9 @@ namespace Godot.SourceGenerators
             out string? value
         )
         {
-        // context.AnalyzerConfigOptions.GlobalOptions.TryGetValue("build_property." + property, out value);
+            // context.AnalyzerConfigOptions.GlobalOptions.TryGetValue("build_property." + property, out value);
             value = default;
+
             return false;
         }
 
@@ -43,19 +45,32 @@ namespace Godot.SourceGenerators
 
         public static bool IsSourceGenEnabled(this AnalyzerConfigOptionsProvider provider, string generatorName)
         {
-            if (provider.GlobalOptions.TryGetValue("GodotSourceGenerators", out string? toggle) &&
+            if (provider.GlobalOptions.TryGetOptionValue("GodotSourceGenerators", out string? toggle) &&
                 toggle?.Equals("disabled", StringComparison.OrdinalIgnoreCase) is true)
                 return false;
 
-            if (provider.GlobalOptions.TryGetValue("GodotDisabledSourceGenerators", out string? disabledGenerators) && disabledGenerators?.Split(';').Contains(generatorName) is true)
+            if (provider.GlobalOptions.TryGetOptionValue(
+                    "GodotDisabledSourceGenerators",
+                    out string? disabledGenerators
+                ) &&
+                disabledGenerators?.Split(';').Contains(generatorName) is true)
                 return false;
 
             return true;
         }
 
+        public static bool TryGetOptionValue(this AnalyzerConfigOptions options, string optionName, out string? value)
+        {
+            if (options.TryGetValue(optionName, out value)) return true;
+            if (options.TryGetValue("build_property." + optionName, out value)) return true;
+
+            return false;
+        }
+
         public static bool IsToolsProject(this AnalyzerConfigOptionsProvider provider)
         {
-            return provider.GlobalOptions.TryGetValue("IsGodotToolsProject", out string? toggle) && toggle?.Equals("true", StringComparison.OrdinalIgnoreCase) is true;
+            return provider.GlobalOptions.TryGetOptionValue("IsGodotToolsProject", out string? toggle) &&
+                toggle?.Equals("true", StringComparison.OrdinalIgnoreCase) is true;
         }
 
         public static bool InheritsFrom(this ITypeSymbol? symbol, string assemblyName, string typeFullName)
@@ -125,9 +140,32 @@ namespace Godot.SourceGenerators
             if (cancellationToken.IsCancellationRequested) return new(null, null);
             if (context.Node is not ClassDeclarationSyntax cds) return new(null, null);
             if (context.SemanticModel.GetDeclaredSymbol(cds) is not INamedTypeSymbol symbol) return new(null, cds);
-            if (symbol.BaseType is null || !symbol.BaseType.InheritsFrom("GodotSharp", GodotClasses.GodotObject)) return new(null, cds);
+            if (symbol.BaseType is null || !symbol.BaseType.InheritsFrom("GodotSharp", GodotClasses.GodotObject))
+                return new(null, cds);
 
             return new(symbol, cds);
+        }
+
+        public const string GodotAssemblyName = "GodotSharp";
+
+        public static bool IsGodotObjectType(this ITypeSymbol? typeSymbol)
+        {
+            if (typeSymbol is null) return false;
+
+            return typeSymbol.InheritsFrom(GodotAssemblyName, GodotClasses.GodotObject);
+        }
+
+        private static readonly SymbolDisplayFormat DeclarationFormat = new(
+            SymbolDisplayGlobalNamespaceStyle.Omitted,
+            SymbolDisplayTypeQualificationStyle.NameOnly,
+            SymbolDisplayGenericsOptions.IncludeTypeConstraints | SymbolDisplayGenericsOptions.IncludeTypeParameters,
+            SymbolDisplayMemberOptions.IncludeModifiers | SymbolDisplayMemberOptions.IncludeAccessibility,
+            kindOptions: SymbolDisplayKindOptions.IncludeTypeKeyword
+        );
+
+        public static string ToDeclarationString(this INamedTypeSymbol symbol)
+        {
+            return symbol.ToDisplayString(DeclarationFormat);
         }
 
         public record Context
@@ -141,6 +179,7 @@ namespace Godot.SourceGenerators
                 if (symbol is null || syntax is null)
                 {
                     IsValid = false;
+
                     return;
                 }
 
@@ -162,8 +201,39 @@ namespace Godot.SourceGenerators
         )
         {
             return context.SyntaxProvider.CreateSyntaxProvider(IsGodotScriptClassPredicate, GodotScriptClassTransform)
-                .Where(c => c.IsValid).WithComparer(Context.SymbolComparer);
+                .Where(c => c.IsValid)
+                .WithComparer(Context.SymbolComparer);
         }
+
+        // public static IncrementalValuesProvider<Tuple<Context, Compilation>> MakeCompilationWide(
+        //     this IncrementalValuesProvider<Context> provider,
+        //     in IncrementalGeneratorInitializationContext context
+        // )
+        // {
+        //     return provider.Combine(context.CompilationProvider).Select(Selector).WhereItem1NotNull().WhereItem2NotNull();
+        //
+        //     Tuple<Context?, Compilation?> Selector((Context Left, Compilation Right) arg1, CancellationToken arg2)
+        //     {
+        //         var (ctx, compilation) = arg1;
+        //
+        //         if (ctx is null || !ctx.IsValid || arg2.IsCancellationRequested) return new Tuple<Context?, Compilation?>(null, null);
+        //
+        //         compilation.Assembly.
+        //     }
+        // }
+
+        public static IncrementalValuesProvider<T> WhereNotNull<T>(this IncrementalValuesProvider<T?> provider) =>
+            provider.Where(t => t is not null);
+
+        public static IncrementalValuesProvider<Tuple<T1, T2>> WhereItem1NotNull<T1, T2>(
+            this IncrementalValuesProvider<Tuple<T1?, T2>> provider
+        ) =>
+            provider.Where(t => t.Item1 is not null);
+
+        public static IncrementalValuesProvider<Tuple<T1, T2>> WhereItem2NotNull<T1, T2>(
+            this IncrementalValuesProvider<Tuple<T1, T2?>> provider
+        ) =>
+            provider.Where(t => t.Item2 is not null);
 
         private static bool TryGetGodotScriptClass(
             this ClassDeclarationSyntax cds,
@@ -538,6 +608,12 @@ namespace Godot.SourceGenerators
             {
                 return new AnonEqualityComparer<T>(comparer, hash);
             }
+        }
+
+        extension(IEqualityComparer)
+        {
+            public static IEqualityComparer<T> CreateAnon<T>(Func<T?, T?, bool> comparer, Func<T?, int> hash) =>
+                new AnonEqualityComparer<T>(comparer, hash);
         }
     }
 }

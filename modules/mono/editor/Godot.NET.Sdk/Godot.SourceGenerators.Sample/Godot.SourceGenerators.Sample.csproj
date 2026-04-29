@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <LangVersion>14</LangVersion>
+    <LangVersion>preview</LangVersion>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -31,5 +31,17 @@
   <!-- This file is imported automatically when using PackageReference to
   reference Godot.SourceGenerators, but not when using ProjectReference -->
   <Import Project="..\Godot.SourceGenerators\Godot.SourceGenerators.props" />
+
+  <!-- For debugging SourceGenerators in Rider-->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="5.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  
+  <PropertyGroup>
+    <GodotSourceGenerators>disabled</GodotSourceGenerators> <!-- toggle source gen-->
+  </PropertyGroup>
 
 </Project>

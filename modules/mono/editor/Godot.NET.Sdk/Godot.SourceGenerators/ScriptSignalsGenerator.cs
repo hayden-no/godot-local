@@ -101,8 +101,10 @@ namespace Godot.SourceGenerators
 
             bool isInnerClass = symbol.ContainingType != null;
 
-            string uniqueHint = symbol.FullQualifiedNameOmitGlobal().SanitizeQualifiedNameForUniqueHint()
-                                + "_ScriptSignals.generated";
+            // string uniqueHint = symbol.FullQualifiedNameOmitGlobal().SanitizeQualifiedNameForUniqueHint()
+            //                     + "_ScriptSignals.generated";
+
+            string uniqueHint = GenUtil.GetFileHint(GENERATOR_NAME, symbol);
 
             var source = new StringBuilder();
 
