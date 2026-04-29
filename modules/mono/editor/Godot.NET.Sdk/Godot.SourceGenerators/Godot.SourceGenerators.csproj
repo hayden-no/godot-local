@@ -37,4 +37,7 @@
     <!-- Package the props file -->
     <None Include="Godot.SourceGenerators.props" Pack="true" PackagePath="build" Visible="true" />
   </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Generated\" />
+  </ItemGroup>
 </Project>

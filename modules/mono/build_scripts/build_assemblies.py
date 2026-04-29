@@ -346,13 +346,16 @@ def build_all(
     generate_sdk_package_versions()
 
     # Godot API
+    print(" ### Building Godot API")
     exit_code = build_godot_api(
         msbuild_tool, module_dir, output_dir, push_nupkgs_local, precision, no_deprecated, werror
     )
     if exit_code != 0:
+        print(" ### Godot API failed to build. See above for details.")
         return exit_code
 
     # GodotTools
+    print(" ### Building GodotTools")
     sln = os.path.join(module_dir, "editor/GodotTools/GodotTools.sln")
     args = ["/restore", "/t:Build", "/p:Configuration=" + ("Debug" if dev_debug else "Release")] + (
         ["/p:GodotPlatform=" + godot_platform] if godot_platform else []
@@ -363,9 +366,11 @@ def build_all(
         args += ["/p:GodotFloat64=true"]
     exit_code = run_msbuild(msbuild_tool, sln=sln, chdir_to=module_dir, msbuild_args=args)
     if exit_code != 0:
+        print(" ### GodotTools failed to build. See above for details.")
         return exit_code
 
     # Godot.NET.Sdk
+    print(" ### Building Godot.NET.Sdk")
     args = ["/restore", "/t:Build", "/p:Configuration=Release"]
     if push_nupkgs_local:
         args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
@@ -376,8 +381,10 @@ def build_all(
     sln = os.path.join(module_dir, "editor/Godot.NET.Sdk/Godot.NET.Sdk.sln")
     exit_code = run_msbuild(msbuild_tool, sln=sln, chdir_to=module_dir, msbuild_args=args)
     if exit_code != 0:
+        print(" ### Godot.NET.Sdk failed to build. See above for details.")
         return exit_code
 
+    print(" ### Build complete")
     return 0
 
 
